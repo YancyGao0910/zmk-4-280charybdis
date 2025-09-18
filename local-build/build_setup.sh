@@ -132,7 +132,7 @@ for shield in "${shields[@]}"; do
   # Install only the custom shield into the ZMK module’s shields directory
   printf "⚙️  %s\n" "→ Installing custom shield ($shield) into ZMK module"
   ZMK_SHIELDS_DIR="$BUILD_REPO/zmk/app/boards/shields"
-  rm -rf "$ZMK_SHIELDS_DIR"/*
+  rm -rf "$ZMK_SHIELDS_DIR/$shield"
   mv "$BUILD_REPO/$SHIELD_PATH/$shield" "$ZMK_SHIELDS_DIR/"
 
   # Ensure charybdis-layouts.dtsi is in the shield directory for overlay includes
@@ -176,6 +176,20 @@ for shield in "${shields[@]}"; do
         STUDIO_SNIPPET="-S studio-rpc-usb-uart"
       fi
 
+      # Add prospector adapter for dongle builds
+      if [[ "$target" == *dongle* ]]; then
+        SHIELD_ARG="${target};prospector_adapter"   # build both shields together
+      else
+        SHIELD_ARG="$target"
+      fi
+      
+      # If we are building the dongle target, also copy the Prospector adapter
+      if [[ "$target" == *dongle* ]]; then
+        ADAPTER_SRC="$BUILD_REPO/prospector-zmk-module/boards/shields/prospector_adapter"
+        rm -rf "$ZMK_SHIELDS_DIR/prospector_adapter"
+        cp -r "$ADAPTER_SRC" "$ZMK_SHIELDS_DIR/"
+      fi
+
       # Enable logging
       USB_LOGGING_SNIPPET=""
       if [[ "$ENABLE_USB_LOGGING" == "true" ]]; then
@@ -193,7 +207,7 @@ for shield in "${shields[@]}"; do
         $USB_LOGGING_SNIPPET \
         -- \
           -DZMK_CONFIG="$BASE_DIR/$CONFIG_PATH" \
-          -DSHIELD="$target" $ZMK_LOAD_ARG
+          -DSHIELD="$SHIELD_ARG" $ZMK_LOAD_ARG
       echo ""
       
       # Find the built firmware (prefer .uf2, else fallback)
