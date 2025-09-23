@@ -21,10 +21,6 @@ if [ ! -d ".west" ]; then
     west init -l config
 fi
 
-# # Mark ZMK source as a safe Git directory
-# git config --global --add safe.directory /workspaces/zmk/zephyr
-# git config --global --add safe.directory /workspaces/zmk/zmk
-
 # Update to fetch all modules and dependencies
 echo "Updating west modules..."
 west update > /dev/null 2>&1
@@ -33,7 +29,7 @@ west update > /dev/null 2>&1
 echo "Preparing Zephyr build environment..."
 west zephyr-export > /dev/null 2>&1
 
-# --- Set location for local binaries ---
+# Set location for local binaries
 LOCAL_BIN_DIR="$REPO_ROOT/local-build"
 mkdir -p "$LOCAL_BIN_DIR"
 
@@ -42,7 +38,7 @@ if [[ ":$PATH:" != *":$LOCAL_BIN_DIR:"* ]]; then
   PATH="$LOCAL_BIN_DIR:$PATH"
 fi
 
-# --- Install yq (downloads Mike Farah's Go-based yq) for YAML processing ---
+# Install yq (downloads Mike Farah's Go-based yq) for YAML processing
 if [ ! -f "$LOCAL_BIN_DIR/yq" ]; then
   echo "Installing yq..."
   curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o "$LOCAL_BIN_DIR/yq"
@@ -52,7 +48,7 @@ else
   echo "yq already installed."
 fi
 
-# --- Install jq (downloads jq binary) for JSON processing ---
+# Install jq binary for JSON processing
 if [ ! -f "$LOCAL_BIN_DIR/jq" ]; then
   echo "Installing jq..."
   curl -fsSL https://github.com/stedolan/jq/releases/latest/download/jq-linux64 -o "$LOCAL_BIN_DIR/jq"
@@ -79,12 +75,6 @@ if [ ${#build_entries[@]} -eq 0 ]; then
   echo "[WARN] No build entries defined in build.yaml"
   exit 0
 fi
-
-# # Print all discovered build entries (for debug)
-# echo "🔍 Parsed build entries from build.yaml:"
-# for entry in "${build_entries[@]}"; do
-#   echo "  $entry"
-# done
 
 
 # --- SANDBOX SETUP FUNCTION ---
@@ -117,7 +107,7 @@ setup_sandbox() {
   if [[ "$shield" == "settings_reset" ]]; then
     echo "Using upstream settings_reset shield"
 
-    # Patch the mock matrix with a single entry so GCC stops warning about zero length.
+    # Patch the settings_reset overlay mock kscan with a single entry so GCC stops warning about zero length.
     reset_overlay="$SANDBOX_ROOT/zmk/app/boards/shields/settings_reset/settings_reset.overlay"
     sed -i 's/rows = <0>;/rows = <1>;/' "$reset_overlay"
     sed -i 's/events = <>;/events = <0>;/' "$reset_overlay"
@@ -143,9 +133,6 @@ build_firmware() {
   build_dir=$(mktemp -d)
 
   printf '\n=== BUILDING FIRMWARE ===\n'
-  printf 'Build Directory:\n'
-  printf '  %s\n' "$build_dir"
-
   printf 'Build Context:\n'
   printf '  Shield : %s\n' "$shield"
   printf '  Target : %s\n' "$target"
@@ -153,6 +140,10 @@ build_firmware() {
     printf '  Keymap : %s\n' "$keymap"
   fi
   printf '  Board  : %s\n' "$board"
+  printf "\n"
+
+  printf 'Build Directory:\n'
+  printf '  %s\n' "$build_dir"
 
   # Add any extra snippets if specified in build.yaml (mostly used for ZMK Studio)
   local extra_snippet=""
@@ -166,6 +157,7 @@ build_firmware() {
     usb_logging_snippet="-S zmk-usb-logging"
   fi
 
+  # Load PMW3610 module only when the shield references the PMW3610 driver
   local zmk_load_arg=""
   if grep -q "charybdis_pmw3610" "$ZMK_SHIELDS_DIR/$shield/"*.overlay 2>/dev/null; then
     zmk_load_arg="-DZMK_EXTRA_MODULES=$SANDBOX_ROOT/zmk-pmw3610-driver"
@@ -198,6 +190,7 @@ build_firmware() {
     return 1
   fi
 
+  echo "=== PUBLISHING ARTIFACT & CLEANING UP ==="
   # Map the entry format to the correct directory name:
   # "bt"                - use charybdis_bt
   # "standard_dongle"   - use charybdis_dongle
@@ -211,30 +204,34 @@ build_firmware() {
   esac
 
   # Publish the firmware artifact to the correct directory and set permissions
-  local firmwares_format_dir
-  firmwares_format_dir="/workspaces/zmk/firmwares/${format_dir}"
-  # If no keymap, fall back to shield name + "_no_keymap"
-  local dir_suffix
-  dir_suffix="${keymap:-${shield}_no_keymap}"
-  local firmwares_dir
-  firmwares_dir="${firmwares_format_dir}/${dir_suffix}"
-
-  mkdir -p "$firmwares_dir"
-  chmod 777 "$firmwares_format_dir" "$firmwares_dir"
-
   local dest
-  dest="$firmwares_dir/${target}.${artifact_ext}"
-  echo "=== PUBLISHING ARTIFACT & CLEANING UP ==="
+  local firmwares_format_dir
+
+  if [[ "$shield" == "settings_reset" ]]; then
+    # Reset firmware goes at top-level (no folder)
+    firmwares_dir="/workspaces/zmk/firmwares"
+    mkdir -p "$firmwares_dir"
+    chmod 777 "$firmwares_dir"
+    dest="$firmwares_dir/settings_reset.${artifact_ext}"
+  else
+    # Normal builds are structured by format/keymap
+    local firmwares_format_dir="/workspaces/zmk/firmwares/${format_dir}"
+    local dir_suffix="${keymap:-${shield}_no_keymap}"
+    firmwares_dir="${firmwares_format_dir}/${dir_suffix}"
+
+    mkdir -p "$firmwares_dir"
+    chmod 777 "$firmwares_format_dir" "$firmwares_dir"
+    dest="$firmwares_dir/${target}.${artifact_ext}"
+  fi
+  
   printf 'Source: %s\n' "$artifact_src"
   printf 'Destination: %s\n' "$dest"
   cp "$artifact_src" "$dest"
   chmod 666 "$dest"
 }
 
-# --- BUILD LOOP FOR EACH SHIELD x KEYMAP ---
-echo "Building matrix of firmwares based on build.yaml..."
-
-for entry_json in "${BUILD_ENTRIES[@]}"; do
+echo "Generating build matrix for each board, shield, and keymap combination in build.yaml..."
+for entry_json in "${build_entries[@]}"; do
   # Pull format & snippet values out of the JSON
   entry_format=$(jq -r '.format // .name // "custom"' <<<"$entry_json")
   entry_snippet=$(jq -r '.snippet // ""' <<<"$entry_json")
@@ -279,7 +276,6 @@ for entry_json in "${BUILD_ENTRIES[@]}"; do
     end
   ' <<<"$entry_json")
 
-  # Loop through each board, shield, and keymap combination matrix
   for entry_board in "${entry_boards[@]}"; do
     for shield in "${entry_shields[@]}"; do
       setup_sandbox "$shield"
