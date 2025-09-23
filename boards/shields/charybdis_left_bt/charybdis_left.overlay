@@ -1,17 +1,5 @@
-#include "charybdis.dtsi"
-#include "charybdis_pmw3610.dtsi"
-#include "charybdis_pointer.dtsi"
+#include "../charybdis_common/charybdis.dtsi"
 
-// The matrix transform is 6 columns over because the left half is 6 columns wide.
-&default_transform {
-	col-offset = <6>;
-};
-
-&five_column_transform {
-	col-offset = <5>;
-};
-
-// KSCAN matrix
 &kscan0 {
 	compatible = "zmk,kscan-gpio-matrix";
 	
@@ -30,10 +18,4 @@
 		, <&pro_micro 4 GPIO_ACTIVE_HIGH>
 		, <&pro_micro 9 GPIO_ACTIVE_HIGH>
 		;
-};
-
-/* enable the listener on central */
-&trackball_listener {
-    status = "okay";
-    device = <&trackball>;
 };
