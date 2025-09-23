@@ -2,7 +2,7 @@
 # build_zmk_locally.sh - Build ZMK firmware locally based on the matrix created from build.yaml
 
 set -euo pipefail
-start_time=$(date +%s)
+START_TIME=$(date +%s)
 
 # --- CONFIGURABLE SETTINGS ---
 ENABLE_USB_LOGGING="false"                         # Set to "true" to enable USB logging
@@ -103,7 +103,7 @@ setup_sandbox() {
 
   # Copy all configs to the sandboxed zmk app path
   # This will allow #include directives to be the same as they are in the repo
-  printf 'Installing configs'
+  printf 'Installing configs\n'
   NEW_CONFIG_PATH="$SANDBOX_ROOT/zmk/app/config"
   rm -rf "$NEW_CONFIG_PATH"
   mkdir -p "$NEW_CONFIG_PATH"
@@ -136,75 +136,63 @@ rm -rf /workspaces/zmk/firmwares/*
 build_firmware() {
   local shield="$1"
   local target="$2"
-  local  board="$3"
-  local keymap="${4:-}"   # optional
+  local board="$3"
+  local keymap="${4:-}"
 
-  # Create a fresh build directory for each build
-  BUILD_DIR=$(mktemp -d)
-  # printf 'Build directory: %s\n' "$BUILD_DIR"
-  # if [[ -n "$keymap" ]]; then
-  #   printf '[BUILD INFO] shield=%s target=%s keymap=%s board=%s\n' "$shield" "$target" "$keymap" "$board"
-  # else
-  #   printf '[BUILD INFO] shield=%s target=%s board=%s\n' "$shield" "$target" "$board"
-  # fi
+  local build_dir
+  build_dir=$(mktemp -d)
 
-  printf "\n"
-  printf "=== BUILDING FIRMWARE ===\n"
+  printf '\n=== BUILDING FIRMWARE ===\n'
   printf 'Build Directory:\n'
-  printf '  %s\n' "$BUILD_DIR"
+  printf '  %s\n' "$build_dir"
 
+  printf 'Build Context:\n'
+  printf '  Shield : %s\n' "$shield"
+  printf '  Target : %s\n' "$target"
   if [[ -n "$keymap" ]]; then
-    printf 'Build Info:\n'
-    printf '  Shield: %s\n' "$shield"
-    printf '  Target: %s\n' "$target"
-    printf '  Keymap: %s\n' "$keymap"
-    printf '  Board:  %s\n' "$board"
-  else
-    printf 'Build Info:\n'
-    printf '  Shield: %s\n' "$shield"
-    printf '  Target: %s\n' "$target"
-    printf '  Board:  %s\n' "$board"
+    printf '  Keymap : %s\n' "$keymap"
   fi
+  printf '  Board  : %s\n' "$board"
 
   # Add any extra snippets if specified in build.yaml (mostly used for ZMK Studio)
-  EXTRA_SNIPPET=""
+  local extra_snippet=""
   if [[ -n "$entry_snippet" ]]; then
-    EXTRA_SNIPPET="-S $entry_snippet"
+    extra_snippet="-S $entry_snippet"
   fi
 
   # Enable USB logging if specified at the top of this script
-  USB_LOGGING_SNIPPET=""
+  local usb_logging_snippet=""
   if [[ "$ENABLE_USB_LOGGING" == "true" ]]; then
-    USB_LOGGING_SNIPPET="-S zmk-usb-logging"
+    usb_logging_snippet="-S zmk-usb-logging"
   fi
 
-  # Load extra modules only when the shield references the PMW3610 driver
+  local zmk_load_arg=""
   if grep -q "charybdis_pmw3610" "$ZMK_SHIELDS_DIR/$shield/"*.overlay 2>/dev/null; then
-    ZMK_LOAD_ARG="-DZMK_EXTRA_MODULES=$SANDBOX_ROOT/zmk-pmw3610-driver"
-  else
-    ZMK_LOAD_ARG=""
+    zmk_load_arg="-DZMK_EXTRA_MODULES=$SANDBOX_ROOT/zmk-pmw3610-driver"
   fi
 
   # Run the build
   west build --pristine -s "$SANDBOX_ROOT/zmk/app" \
-    -d "$BUILD_DIR" \
+    -d "$build_dir" \
     -b "$board" \
-    $EXTRA_SNIPPET \
-    $USB_LOGGING_SNIPPET \
+    $extra_snippet \
+    $usb_logging_snippet \
     -- \
       -DZMK_CONFIG="$NEW_CONFIG_PATH" \
       -DSHIELD="$target" \
-      $ZMK_LOAD_ARG \
+      $zmk_load_arg \
 
   echo ""
 
   # Determine the artifact type to copy (prefer .uf2, fallback to specified binary type)
-  if [ -f "$BUILD_DIR/zephyr/zmk.uf2" ]; then
-    ARTIFACT_SRC="$BUILD_DIR/zephyr/zmk.uf2"
-    ARTIFACT_EXT="uf2"
-  elif [ -f "$BUILD_DIR/zephyr/zmk.${FALLBACK_BINARY}" ]; then
-    ARTIFACT_SRC="$BUILD_DIR/zephyr/zmk.${FALLBACK_BINARY}"
-    ARTIFACT_EXT="$FALLBACK_BINARY"
+  local artifact_src=""
+  local artifact_ext=""
+  if [ -f "$build_dir/zephyr/zmk.uf2" ]; then
+    artifact_src="$build_dir/zephyr/zmk.uf2"
+    artifact_ext="uf2"
+  elif [ -f "$build_dir/zephyr/zmk.${FALLBACK_BINARY}" ]; then
+    artifact_src="$build_dir/zephyr/zmk.${FALLBACK_BINARY}"
+    artifact_ext="$FALLBACK_BINARY"
   else
     echo "[WARN] No firmware artifact found for ${target}-${keymap}-${board}"
     return 1
@@ -223,26 +211,30 @@ build_firmware() {
   esac
 
   # Publish the firmware artifact to the correct directory and set permissions
-  FIRMWARES_FORMAT_DIR="/workspaces/zmk/firmwares/${format_dir}"
+  local firmwares_format_dir
+  firmwares_format_dir="/workspaces/zmk/firmwares/${format_dir}"
   # If no keymap, fall back to shield name + "_no_keymap"
+  local dir_suffix
   dir_suffix="${keymap:-${shield}_no_keymap}"
-  FIRMWARES_DIR="${FIRMWARES_FORMAT_DIR}/${dir_suffix}"
+  local firmwares_dir
+  firmwares_dir="${firmwares_format_dir}/${dir_suffix}"
 
-  mkdir -p "$FIRMWARES_DIR"
-  chmod 777 "$FIRMWARES_FORMAT_DIR" "$FIRMWARES_DIR"
+  mkdir -p "$firmwares_dir"
+  chmod 777 "$firmwares_format_dir" "$firmwares_dir"
 
-  DEST="$FIRMWARES_DIR/${target}.${ARTIFACT_EXT}"
+  local dest
+  dest="$firmwares_dir/${target}.${artifact_ext}"
   echo "=== PUBLISHING ARTIFACT & CLEANING UP ==="
-  printf 'Source: %s\n' "$ARTIFACT_SRC"
-  printf 'Destination: %s\n' "$DEST"
-  cp "$ARTIFACT_SRC" "$DEST"
-  chmod 666 "$DEST"
+  printf 'Source: %s\n' "$artifact_src"
+  printf 'Destination: %s\n' "$dest"
+  cp "$artifact_src" "$dest"
+  chmod 666 "$dest"
 }
 
 # --- BUILD LOOP FOR EACH SHIELD x KEYMAP ---
 echo "Building matrix of firmwares based on build.yaml..."
 
-for entry_json in "${build_entries[@]}"; do
+for entry_json in "${BUILD_ENTRIES[@]}"; do
   # Pull format & snippet values out of the JSON
   entry_format=$(jq -r '.format // .name // "custom"' <<<"$entry_json")
   entry_snippet=$(jq -r '.snippet // ""' <<<"$entry_json")
@@ -331,10 +323,10 @@ for entry_json in "${build_entries[@]}"; do
 done
 
 # --- CALCULATE EXECUTION TIME ---
-end_time=$(date +%s)
-elapsed=$(( end_time - start_time ))
-minutes=$(( elapsed / 60 ))
-seconds=$(( elapsed % 60 ))
+END_TIME=$(date +%s)
+ELAPSED=$(( END_TIME - START_TIME ))
+MINUTES=$(( ELAPSED / 60 ))
+SECONDS=$(( ELAPSED % 60 ))
 echo "=== BUILD COMPLETE ==="
-echo "${minutes}m ${seconds}s @ $(date '+%Y-%m-%d %H:%M:%S')"
+echo "${MINUTES}m ${SECONDS}s @ $(date '+%Y-%m-%d %H:%M:%S')"
 echo ""
