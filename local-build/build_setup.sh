@@ -42,7 +42,6 @@ fi
 if [ ! -f "$LOCAL_BIN_DIR/yq" ]; then
   echo "Installing yq..."
   curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o "$LOCAL_BIN_DIR/yq"
-  chown 777 "$LOCAL_BIN_DIR/yq"
   chmod +x "$LOCAL_BIN_DIR/yq"
 else
   echo "yq already installed."
@@ -52,7 +51,6 @@ fi
 if [ ! -f "$LOCAL_BIN_DIR/jq" ]; then
   echo "Installing jq..."
   curl -fsSL https://github.com/stedolan/jq/releases/latest/download/jq-linux64 -o "$LOCAL_BIN_DIR/jq"
-  chown 777 "$LOCAL_BIN_DIR/jq"
   chmod +x "$LOCAL_BIN_DIR/jq"
 else
   echo "jq already installed."
