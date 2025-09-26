@@ -3,6 +3,9 @@ run-name: Draw keymaps
 
 on:
   push:
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   draw_base_keymap:
