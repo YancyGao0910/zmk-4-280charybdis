@@ -14,7 +14,7 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
-      groups: ${{ steps.make-groups.outputs.groups }}
+      groups: ${{ steps.build-matrix.outputs.groups }}
 
     steps:
     - name: Checkout repo (no submodules)
@@ -32,17 +32,68 @@ jobs:
     #     echo "⚙️ Generating additional keymaps"
     #     mv config/keymap/charybdis.keymap config/keymap/qwerty.keymap
 
-    - uses: actions/upload-artifact@v4
-      with: { name: generated-keymaps, path: config/keymap/ }
-
-    - name: Build-matrix JSON
-      run: python scripts/generate_matrix.py > build.json
-
-    - id: make-groups
+    - name: Generate build matrix
+      id: build-matrix
       run: |
-        echo "groups=$(jq -c 'map({keymap,format,name,board})' build.json)" >>"$GITHUB_OUTPUT"
+        matrix=$(yq -oj '.' build.yaml | python - <<'PY'
+import json, sys
+
+
+def as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+data = json.load(sys.stdin)
+defaults = as_list(data.get("board"))
+result = []
+
+for entry in data.get("include", []):
+    if not isinstance(entry, dict):
+        continue
+
+    name = entry.get("name") or entry.get("format") or "custom"
+    fmt = entry.get("format") or name
+    boards = as_list(entry.get("board")) or defaults
+    if not boards:
+        raise SystemExit(f"Entry '{name}' is missing a board")
+
+    shields = as_list(entry.get("shield") or entry.get("shields"))
+    if not shields:
+        raise SystemExit(f"Entry '{name}' is missing a shield list")
+
+    keymaps = as_list(entry.get("keymap") or entry.get("keymaps")) or [""]
+    snippets = as_list(entry.get("snippet") or entry.get("snippets"))
+    cmake_args = as_list(entry.get("cmake-args"))
+    artifact_prefix = entry.get("artifact-name") or entry.get("artifact-prefix") or ""
+
+    for board in boards:
+        for keymap in keymaps:
+            keymap_str = keymap or ""
+            display = name if not keymap_str else f"{name}-{keymap_str}"
+            result.append(
+                {
+                    "name": display,
+                    "entry": name,
+                    "format": fmt,
+                    "board": board,
+                    "keymap": keymap_str,
+                    "shields": shields,
+                    "snippets": snippets,
+                    "cmake_args": cmake_args,
+                    "artifact_prefix": artifact_prefix,
+                }
+            )
+
+print(json.dumps(result))
+PY
+        )
+        echo "groups=$matrix" >>"$GITHUB_OUTPUT"
         echo "⚙️ Build Matrix Created"
-        cat build.json | jq .
+        echo "$matrix" | jq .
 
 # ──────────────────────────────────────────────────────────────
 #  BUILD
@@ -59,8 +110,8 @@ jobs:
         combo: ${{ fromJson(needs.setup.outputs.groups) }}
 
     steps:
-    - name: Install tree
-      run: apt-get update && apt-get install -y tree
+    - name: Install build helpers
+      run: apt-get update && apt-get install -y jq tree
 
     # ───────── update zmk sub-repo ─────────
     - name: Checkout workflow repo
@@ -86,111 +137,119 @@ jobs:
         echo "👀 West workspace ready. Project structure:"
         west list
 
-    # ───────── pull in keymaps ─────────
-    - name: Download keymaps
-      uses: actions/download-artifact@v4
-      with: { name: generated-keymaps, path: config/keymap }
-
     # ───────── stage keymaps and helper files ─────────
-    - name: Stage keymaps, overlays, and dtsi files into source tree
+    - name: Stage keymaps and helper overlays
       shell: bash
+      env:
+        KEYMAP: ${{ matrix.combo.keymap }}
       run: |
-        # Create overlays directory inside zmk/app
+        set -euo pipefail
         mkdir -p zmk/app/overlays
+        rm -f zmk/app/overlays/charybdis.keymap
 
-        # Only for bt/dongle builds, copy in the single keymap and any helpers
-        if [[ "${{ matrix.combo.format }}" != "reset" ]]; then
-          cp config/keymap/${{ matrix.combo.keymap }}.keymap \
-             zmk/app/overlays/charybdis.keymap
-
-          # copy helper .dtsi files if they exist
-          cp config/*.dtsi zmk/app/overlays/ 2>/dev/null || true
-          cp config/keymap/*.dtsi zmk/app/overlays/ 2>/dev/null || true
+        if [[ -n "$KEYMAP" ]]; then
+          KEYMAP_PATH="config/keymaps/$KEYMAP.keymap"
+          if [[ ! -f "$KEYMAP_PATH" ]]; then
+            echo "Missing keymap file: $KEYMAP_PATH" >&2
+            exit 1
+          fi
+          cp "$KEYMAP_PATH" zmk/app/overlays/charybdis.keymap
         fi
+
+        cp config/*.dtsi zmk/app/overlays/ 2>/dev/null || true
+        cp config/keymap_features/*.dtsi zmk/app/overlays/ 2>/dev/null || true
+        cp config/trackball/*.dtsi zmk/app/overlays/ 2>/dev/null || true
 
     # ───────── Inject custom shields & helper DTSI files ─────────
     - name: Inject custom shields & helper files
-      if: ${{ matrix.combo.format != 'reset' }}
+      if: ${{ matrix.combo.entry != 'settings_reset' }}
       shell: bash
       run: |
         ZMK_SHIELDS_DIR="$GITHUB_WORKSPACE/zmk/app/boards/shields"
         mkdir -p "$ZMK_SHIELDS_DIR"
-        cp -r "boards/shields/charybdis_${{ matrix.combo.format }}" "$ZMK_SHIELDS_DIR/"
-        for d in "$ZMK_SHIELDS_DIR"/*; do
-          for f in charybdis-layouts.dtsi charybdis_pmw3610.dtsi charybdis_pointer.dtsi; do
-            [ -f "config/$f" ] && cp "config/$f" "$d/" || true
+        cp -r boards/shields/* "$ZMK_SHIELDS_DIR/"
+
+        shopt -s nullglob
+        for d in "$ZMK_SHIELDS_DIR"/charybdis_*; do
+          [[ -d "$d" ]] || continue
+          for f in config/charybdis-layouts.dtsi config/charybdis_pmw3610.dtsi config/charybdis_pointer.dtsi config/trackball/charybdis_pointer.dtsi; do
+            [[ -f "$f" ]] || continue
+            cp "$f" "$d/"
           done
         done
+        shopt -u nullglob
 
     # ───────── Build ─────────
     - name: Build combo ${{ matrix.combo.name }}
       shell: bash
       working-directory: zmk/app
+      env:
+        BOARD: ${{ matrix.combo.board }}
+        COMBO_NAME: ${{ matrix.combo.name }}
+        ENTRY_NAME: ${{ matrix.combo.entry }}
+        KEYMAP: ${{ matrix.combo.keymap }}
+        SHIELDS_JSON: ${{ toJson(matrix.combo.shields) }}
+        SNIPPETS_JSON: ${{ toJson(matrix.combo.snippets) }}
+        CMAKE_ARGS_JSON: ${{ toJson(matrix.combo.cmake_args) }}
+        ARTIFACT_PREFIX: ${{ matrix.combo.artifact_prefix }}
+        GITHUB_WORKSPACE: ${{ github.workspace }}
       run: |
         set -euo pipefail
 
-        KM="${{ matrix.combo.keymap }}"
-        FM="${{ matrix.combo.format }}"   # bt | dongle | reset
-        NM="${{ matrix.combo.name }}"
-        BD="${{ matrix.combo.board }}"    # nice_nano_v2
+        OUT_DIR="$GITHUB_WORKSPACE/out/$COMBO_NAME"
+        mkdir -p "$OUT_DIR"
 
-        declare -A LIST=(
-          [bt]="charybdis_left charybdis_right"
-          [dongle]="charybdis_left charybdis_right charybdis_dongle"
-          [reset]="settings_reset"
-        )
+        mapfile -t SHIELDS < <(jq -r '.[]' <<< "$SHIELDS_JSON")
+        mapfile -t SNIPPETS < <(jq -r '.[]' <<< "$SNIPPETS_JSON")
+        mapfile -t EXTRA_ARGS < <(jq -r '.[]' <<< "$CMAKE_ARGS_JSON")
 
-        mkdir -p "$GITHUB_WORKSPACE/out/$NM"
-        CONFIG_DIR="$GITHUB_WORKSPACE/config"
-        
-        # ──────────────────────────────────────────────────────────────
+        if [[ ${#SHIELDS[@]} -eq 0 ]]; then
+          echo "No shields defined for $COMBO_NAME" >&2
+          exit 1
+        fi
 
-        for SH in ${LIST[$FM]}; do
-          BUILD_DIR=$(mktemp -d)
+        for shield in "${SHIELDS[@]}"; do
+          build_dir=$(mktemp -d)
+          cmd=(west build -p -d "$build_dir" -b "$BOARD")
 
-          # studio RPC only on right half of BT builds
-          if [[ "$FM" == "bt" && "$SH" == *right ]]; then
-            SNIPPET_OPTION="-DSNIPPET=studio-rpc-usb-uart"
-          else
-            SNIPPET_OPTION=""
+          for snippet in "${SNIPPETS[@]}"; do
+            [[ -n "$snippet" ]] || continue
+            cmd+=(-S "$snippet")
+          done
+
+          cmd+=(-- "-DZMK_CONFIG=$GITHUB_WORKSPACE/config" "-DSHIELD=$shield")
+
+          if [[ -n "$KEYMAP" ]]; then
+            cmd+=("-DKEYMAP_FILE=overlays/charybdis.keymap")
           fi
 
-          # set keymap
-          if [[ "$FM" != "reset" ]]; then
-            KEYMAP_OPTION="-DKEYMAP_FILE=overlays/charybdis.keymap"
+          for arg in "${EXTRA_ARGS[@]}"; do
+            [[ -n "$arg" ]] || continue
+            cmd+=("$arg")
+          done
+
+          echo "\n🛠 Building $shield ($COMBO_NAME)"
+          printf '→ Command: %s\n' "${cmd[*]}"
+          "${cmd[@]}"
+
+          artifact=""
+          if [[ -f "$build_dir/zephyr/zmk.uf2" ]]; then
+            artifact="$build_dir/zephyr/zmk.uf2"
+          elif [[ -f "$build_dir/zephyr/zmk.bin" ]]; then
+            artifact="$build_dir/zephyr/zmk.bin"
           else
-            KEYMAP_OPTION=""
+            echo "No firmware artifact produced for $shield" >&2
+            exit 1
           fi
 
-          # ───────── DEBUG LOGS ─────────
-          echo "🪳 Debug Logs"
-          echo "Build Variables:"
-          echo "→ Keymap       (KM): $KM"
-          echo "→ Format       (FM): $FM"
-          echo "→ Name         (NM): $NM"
-          echo "→ Board        (BD): $BD"
-          echo "→ Current directory: $(pwd)"
-          echo "→ KEYMAP_OPTION    :$KEYMAP_OPTION"
-          echo "→ SNIPPET_OPTION   :$SNIPPET_OPTION"
-          echo "→ Build dir        : $BUILD_DIR"
-          # echo "→ Directory contents:"
-          # tree .
-          # echo "📍 Showing current build directory and listing contents:"
-          # echo "GITHUB_WORKSPACE:"
-          # tree $GITHUB_WORKSPACE
+          extension="${artifact##*.}"
+          base_name="${shield##*/}"
+          if [[ -n "$ARTIFACT_PREFIX" ]]; then
+            base_name="$ARTIFACT_PREFIX-$base_name"
+          fi
 
-          echo "🛠 Kicking off the firmware build..."
-          west build -p \
-            -d "$BUILD_DIR" \
-            -b "$BD" \
-            -- \
-            "-DZMK_CONFIG=$CONFIG_DIR" \
-            "-DSHIELD=$SH" \
-            "$KEYMAP_OPTION" \
-            "$SNIPPET_OPTION"
-
-          ART=$(if [[ -f "$BUILD_DIR/zephyr/zmk.uf2" ]]; then echo zmk.uf2; else echo zmk.bin; fi)
-          cp "$BUILD_DIR/zephyr/$ART" "$GITHUB_WORKSPACE/out/$NM/$SH.${ART##*.}"
+          cp "$artifact" "$OUT_DIR/$base_name.$extension"
+          echo "✅ Saved $COMBO_NAME/$base_name.$extension"
         done
 
     - name: Upload firmware bundle

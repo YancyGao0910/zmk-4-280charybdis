@@ -1,6 +1,6 @@
 # Build matrix describing every board/shield/keymap combo to build.
-# Each entry under `include` becomes a single matrix item in CI and the
-# local build script mirrors this file, so edit it in one place only.
+# Each entry under `include` becomes a single matrix item in CI and
+# the local build script.
 
 board: [ nice_nano_v2 ]
 
@@ -34,17 +34,29 @@ include:
       - colemak_dh
       - canary
 
-# # Prospector Dongle Firmwares
-#   - name: prospector_dongle
-#     board: nice_nano_v2
-#     shield:
-#       - charybdis_left_dongle
-#       - charybdis_right_dongle
-#       - charybdis_dongle_prospector
-#     keymap:
-#       - qwerty
-#       - colemak_dh
-#       - canary
+# Prospector Dongle Firmwares (touch screen)
+  - name: prospector_dongle
+    board: nice_nano_v2
+    shield:
+      - charybdis_left_dongle
+      - charybdis_right_dongle
+      - charybdis_dongle_touch
+    keymap:
+      - qwerty
+      - colemak_dh
+      - canary
+
+# Prospector Dongle Firmwares (non-touch screen)
+  - name: prospector_dongle_nt
+    board: nice_nano_v2
+    shield:
+      - charybdis_left_dongle
+      - charybdis_right_dongle
+      - charybdis_dongle_no_touch
+    keymap:
+      - qwerty
+      - colemak_dh
+      - canary
 
 # Reset Firmwares
   - name: settings_reset

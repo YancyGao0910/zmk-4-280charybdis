@@ -32,7 +32,7 @@ Download your choice of firmware from the Releases page. Choose a combination of
 
 To see all the layers check out the [full render](keymap-drawer/qwerty.svg).
 
-⌨️ Keyboard Layers
+**Keyboard Layers**
 | # | Layer      | Purpose                                                          |
 | - | ---------- | ---------------------------------------------------------------- |
 | 0 | **BASE**   | Standard typing with timeless home-row mods                      |
@@ -45,14 +45,14 @@ To see all the layers check out the [full render](keymap-drawer/qwerty.svg).
 | 7 | **SLOW**   | Low-speed pointer for pixel-perfect work                         |
 | 8 | **SCROLL** | Vertical/Horizontal scroll layer                                 |
 
-🏠 Home-Row Mods
+**Home-Row Mods**
 | Side                | Hold = Modifier              | Tap = Letter / Key  |
 | ------------------- | ---------------------------- | ------------------- |
 | Left                | **Gui / Alt / Shift / Ctrl** | `A S D F`           |
 | Right               | **Ctrl / Shift / Alt / Gui** | `J K L ;`           |
 
 
-🔗 Combos
+**Combos**
 | Trigger Keys              | Result                                 |
 | ------------------------- | -------------------------------------- |
 | `K17 + K18`               | **Caps Word** (one-shot words in CAPS) |
@@ -63,7 +63,7 @@ To see all the layers check out the [full render](keymap-drawer/qwerty.svg).
 | `K38 + K39` (thumb cluster)| Layer-swap **BASE ⇄ EXTRAS**           |
 
 
-⚙️ Other Highlights
+**Other Highlights**
 - **Timeless home row mods:** Based on [urob's](https://github.com/urob/zmk-config#timeless-homerow-mods) work and configured on the BASE layer with balanced flavor on both halves (280 ms tapping-term, and quick-tap with prior-idle tuning).
 - **Thumb-scroll mode:** Hold the left-most thumb button (K36) while moving the trackball to turn motion into scroll.
 - **Precision cursor mode:** Double-tap, then hold K36 to drop the pointer speed, release to return to normal speed.
@@ -88,17 +88,29 @@ To see all the layers check out the [full render](keymap-drawer/qwerty.svg).
 
 This section will help you personalize your firmware. Everything—from keys and layers to advanced trackball behaviors—can easily be customized, even if you're new to ZMK.
 
+
+### Building Your Customized Firmware
+
+You can easily build the firmware locally or leverage GitHub Actions:
+
+**Local Build (recommended for quick testing and debugging)**
+
+Clone this repo, then run these commands from the repo root:
+```sh
+cd local-build
+docker-compose run --rm builder
+```
+See the [local build README](local-build/README.md) for additional details, including how to enable USB logging in the builds.
+
+**GitHub Actions**
+
+- Fork or clone this repo
+- Push your changes to your GitHub
+- GitHub Actions automatically builds your firmware and publishes downloadable artifacts under the Actions tab.
+
 ### Building Only Specific Keymaps or Shields
 
-By default both Bluetooth and Dongle formats will build firmware pairs for the QWERTY, Coleman DH, and Graphite keymaps. To save time and streamline your builds, you can build just a single keymap or shield that you're interested in:
-
-**Single keymap:**
-Any `.keymap` files in the `config/keymap/` directory will be automatically built. By default QWERTY and Colemak DH are included, but you can add or remove as many as you'd like as long as there is at least one .keymap file to process.
-Some additional keymaps are available in the extra-keymaps directory.
-
-**Single shield format (Dongle or Bluetooth):**
-Delete the shield directory (charybdis_dongle or charybdis_bt) from the config/boards/shields/ folder to build only the format you need.
-
+By default firmware will be built for all formats with all keymaps. Assuming you want to build just one format with a single keymap, adjust the [build.yaml](/build.yaml) file at the root of the repo and comment out anything you don't want to build.
 
 ### Modify Key Mappings
 
@@ -129,32 +141,12 @@ Using a GUI to generate the keymap file before building the firmware is another 
 
 To change a key layout choose a behavior you'd like to assign to a key, then choose a parameter code. This process is more clearly outlined on ZMK's [Keymaps & Behaviors](https://zmk.dev/docs/features/keymaps) page. All keycodes are documented [here](https://zmk.dev/docs/codes) page
 
-Open the config/keymap/charybdis.keymap file and change keys, or add/remove layers, then merge the changes and re-flash the keyboard with the updated firmware.
+Open the [qwerty.keymp](config/keymaps/qwerty.keymap) file and change keys, or add/remove layers, then merge the changes and re-flash the keyboard with the updated firmware. All of the behaviors, combos, and macros are in the [keymap_features](config/keymap_features) folder.
 
 
 ### Modifying Trackball Behavior
 
-The trackball uses ZMK's modular input processor system, making it easy to adjust pointer behavior to your liking. All trackball-related configurations and input processors are conveniently grouped in the `config/charybdis_pointer.dtsi` file. Modify this file to customize tracking speed, acceleration, scrolling behavior, and more—then rebuild your firmware.
-
-
-### Building Your Customized Firmware
-
-You can easily build your firmware locally or leverage GitHub Actions:
-
-**Local Build (recommended for quick testing and debugging)**
-
-Clone this repo, then run these commands from the repo root:
-```sh
-cd local-build
-docker-compose run --rm builder
-```
-See the [local build README](local-build/README.md) for additional details, including how to enable USB logging in the builds.
-
-**GitHub Actions**
-
-- Fork or clone this repo
-- Push your changes to your GitHub
-- GitHub Actions automatically builds your firmware and publishes downloadable artifacts under the Actions tab.
+The trackball uses ZMK's modular input processor system, making it easy to adjust pointer behavior to your liking. All trackball-related configurations and input processors are conveniently grouped in the [charybdis_pointer.dtsi](config/trackball/charybdis_pointer.dtsi) file. Modify this file to customize tracking speed, acceleration, scrolling behavior, and more—then rebuild your firmware.
 
 
 ### Troubleshooting
